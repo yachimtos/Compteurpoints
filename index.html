@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Compteur Multi-Joueurs</title>
+<link rel="icon" type="image/png" href="Compteur.png" />
+<meta name="theme-color" content="#333333">
+<style>
+  body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
+  #config { padding: 10px; background: #333; color: white; display: flex; align-items: center; justify-content: space-between; }
+  #zones { display: flex; flex-wrap: wrap; }
+  .zone { flex: 1 1 45%; display: flex; justify-content: center; align-items: center; flex-direction: column; color: white; font-size: 3rem; user-select: none; position: relative; margin: 5px; height: 200px; border-radius: 10px; }
+  button { font-size: 1.5rem; margin: 5px; width: 60px; height: 60px; border-radius: 50%; border: none; cursor: pointer; }
+  .delta { position: absolute; top: 5%; font-size: 1.5rem; opacity: 0; transition: opacity 0.3s; }
+  .playerName { position: absolute; bottom: 5px; width: 100%; text-align: center; font-size: 1.4rem; color: white; cursor: pointer; }
+  .playerNameInput { position: absolute; bottom: 5px; width: 90%; left: 5%; text-align: center; font-size: 1.4rem; border: none; border-radius: 5px; padding: 3px; }
+
+  #settingsModal { position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.7); display: none; justify-content: center; align-items: center; }
+  #settingsModal > div { background: white; padding: 20px; border-radius: 10px; color: black; text-align: center; }
+  .choiceBtn { width: 50px; height: 50px; margin: 6px; font-size: 1.2rem; border-radius: 8px; cursor: pointer; border: none; background: #333; color: white; }
+
+  #confirmModal { position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.7); display: none; justify-content:center; align-items:center; }
+  #confirmModal div { background:white; padding:20px; border-radius:10px; text-align:center; font-size:1.4rem; }
+  .confirmBtn { width: 80px; height: 50px; border-radius: 8px; border:none; margin:10px; cursor:pointer; font-size:1.2rem; }
+  .yesBtn { background:#4caf50; color:white; }
+  .noBtn { background:#d63c2f; color:white; }
+
+  #winnersModal { position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.7); display: none; justify-content:center; align-items:center; text-align:center; color:white; font-size:1.4rem; }
+  #winnersModal div { background:#333; padding:20px; border-radius:10px; }
+</style>
+</head>
+<body>
+
+<div id="config">
+  <span>Compteur Multi-Joueurs</span>
+  <button onclick="ouvrirSettings()">⚙️</button>
+</div>
+
+<div id="zones"></div>
+
+<!-- PARAMÈTRES -->
+<div id="settingsModal">
+  <div>
+    <label>Score initial :</label>
+    <div style="display:flex; justify-content:center; align-items:center; gap:7px; font-size:1.5rem;">
+      <button class="choiceBtn" onclick="changeInitialScore(-5)">-5</button>
+      <button class="choiceBtn" onclick="changeInitialScore(-1)">-1</button>
+      <span id="initialScoreDisplay" style="min-width:60px; display:inline-block;">0</span>
+      <button class="choiceBtn" onclick="changeInitialScore(1)">+1</button>
+      <button class="choiceBtn" onclick="changeInitialScore(5)">+5</button>
+    </div>
+
+    <hr>
+
+    <!-- BOUTONS RESET ET VAINQUEURS SUR LA MÊME LIGNE -->
+    <div style="display:flex; justify-content:center; gap:50px; margin:10px 0;">
+      <button class="choiceBtn" style="width:auto; padding:10px 20px;" onclick="demanderReset()">🔄</button>
+      <button class="choiceBtn" style="width:auto; padding:10px 20px;" onclick="annoncerVainqueurs()">🏆</button>
+    </div>
+
+    <hr>
+
+    <label>Nombre de joueurs :</label>
+    <div id="playerButtons"></div>
+  </div>
+</div>
+
+<!-- CONFIRMATION RESET -->
+<div id="confirmModal">
+  <div>
+    <p>Réinitialiser tous les scores ?</p>
+    <button class="confirmBtn yesBtn" onclick="resetScores()">Oui</button>
+    <button class="confirmBtn noBtn" onclick="fermerConfirm()">Non</button>
+  </div>
+</div>
+
+<!-- VAINQUEURS -->
+<div id="winnersModal">
+  <div id="winnersContent"></div>
+</div>
+
+<script>
+
+let holdTimeout = null;
+let holdDelay = 500;     // délai avant répétition
+let repeatDelay = 300;   // vitesse de départ
+let minDelay = 100;       // vitesse max
+let acceleration = 0.85; // facteur d'accélération
+
+function startHold(joueur, valeur) {
+  changerScore(joueur, valeur); // 1er clic immédiat
+
+  repeatDelay = 300;
+
+  holdTimeout = setTimeout(function repeat() {
+    changerScore(joueur, valeur);
+
+    // Accélération progressive
+    repeatDelay = Math.max(minDelay, repeatDelay * acceleration);
+
+    holdTimeout = setTimeout(repeat, repeatDelay);
+  }, holdDelay);
+}
+
+function stopHold() {
+  clearTimeout(holdTimeout);
+}
+
+const colors = ['#3aa7ff','#d63c2f','#4caf50','#ffc107','#9c27b0','#ff8da1','#ff9800','#895129','#808080','#000000'];
+
+let numPlayers = parseInt(localStorage.getItem("numPlayers") || "2");
+let scores = JSON.parse(localStorage.getItem("scores") || "[]");
+let savedColors = JSON.parse(localStorage.getItem("colors") || "[]");
+let playerNames = JSON.parse(localStorage.getItem("playerNames") || "[]");
+let initialScore = parseInt(localStorage.getItem("initialScore") || "0");
+
+let timers = [];
+
+/* OUVRIR PARAMÈTRES */
+function ouvrirSettings() {
+  const container = document.getElementById('playerButtons');
+  container.innerHTML = '';
+  for (let i = 1; i <= 10; i++) {
+    const btn = document.createElement('button');
+    btn.className = 'choiceBtn';
+    btn.textContent = i;
+    btn.onclick = () => {
+      numPlayers = i;
+      localStorage.setItem("numPlayers", i);
+      creerJoueurs(i);
+      document.getElementById('settingsModal').style.display = 'none';
+    };
+    container.appendChild(btn);
+  }
+  document.getElementById("initialScoreDisplay").textContent = initialScore;
+  document.getElementById('settingsModal').style.display = 'flex';
+}
+
+/* SCORE INITIAL */
+function changeInitialScore(delta) {
+  initialScore += delta;
+  document.getElementById("initialScoreDisplay").textContent = initialScore;
+  localStorage.setItem("initialScore", initialScore);
+  scores = Array(numPlayers).fill(initialScore);
+  localStorage.setItem("scores", JSON.stringify(scores));
+  for (let i = 0; i < numPlayers; i++) {
+    const scoreEl = document.getElementById("score" + i);
+    if (scoreEl) scoreEl.textContent = initialScore;
+  }
+}
+
+/* RESET SCORES */
+function demanderReset() { document.getElementById("confirmModal").style.display = "flex"; }
+function fermerConfirm() { document.getElementById("confirmModal").style.display = "none"; }
+function resetScores() {
+  fermerConfirm();
+  scores = Array(numPlayers).fill(initialScore);
+  localStorage.setItem("scores", JSON.stringify(scores));
+  for (let i = 0; i < numPlayers; i++) {
+    document.getElementById('score' + i).textContent = initialScore;
+  }
+}
+
+/* ANNONCER VAINQUEURS */
+function annoncerVainqueurs() {
+  document.getElementById('settingsModal').style.display = 'none';
+
+  let liste = [];
+  for (let i = 0; i < numPlayers; i++) {
+    liste.push({nom: playerNames[i] || "Joueur " + (i+1), score: scores[i]});
+  }
+
+  // TRI DÉCROISSANT pour HTML
+  liste.sort((a,b) => b.score - a.score);
+
+  // contenu HTML avec bouton Fermer plus large
+  let html = "<h2>Classement 🏆</h2><ol>";
+  liste.forEach(p => { html += `<li>${p.nom} : ${p.score}</li>`; });
+  html += "</ol><button onclick='fermerWinners()' style='margin-top:10px; padding:10px 20px; min-width:150px; font-size:1.2rem;'>Fermer</button>";
+  document.getElementById("winnersContent").innerHTML = html;
+  document.getElementById("winnersModal").style.display = "flex";
+
+  // SYNTHÈSE VOCALE DU DERNIER AU PREMIER
+  if ('speechSynthesis' in window) {
+    const utter = new SpeechSynthesisUtterance();
+    let texte = "";
+    for (let i = liste.length - 1; i >= 0; i--) {
+      let position = i + 1;
+      texte += `${position}ᵉ place, ${liste[i].nom}, ${liste[i].score} point${liste[i].score>1?'s':''}. `;
+    }
+    utter.text = texte;
+    utter.lang = 'fr-FR';
+    window.speechSynthesis.speak(utter);
+  }
+}
+
+function fermerWinners() { 
+  document.getElementById("winnersModal").style.display = "none"; 
+  if ('speechSynthesis' in window) {
+    window.speechSynthesis.cancel(); // stoppe la synthèse vocale
+  }
+}
+
+/* CREER JOUEURS */
+function creerJoueurs(value) {
+  numPlayers = value || numPlayers;
+  localStorage.setItem("numPlayers", numPlayers);
+
+  scores = scores.length === numPlayers ? scores : Array(numPlayers).fill(initialScore);
+  savedColors = savedColors.length === numPlayers ? savedColors : Array(numPlayers).fill(null);
+  timers = Array(numPlayers).fill(null);
+  playerNames.length = numPlayers;
+  savedColors.length = numPlayers;
+
+  localStorage.setItem("playerNames", JSON.stringify(playerNames));
+  localStorage.setItem("colors", JSON.stringify(savedColors));
+
+  const zones = document.getElementById('zones');
+  zones.innerHTML = '';
+
+  for (let i = 0; i < numPlayers; i++) {
+    const zone = document.createElement('div');
+    zone.className = 'zone';
+    zone.id = 'joueur' + i;
+    const bgColor = savedColors[i] || colors[i % colors.length];
+    zone.style.background = bgColor;
+
+    zone.innerHTML = `
+      <div id="colorBtn${i}" style="position:absolute; top:5px; left:5px; font-size:1.5rem; cursor:pointer;">🎨</div>
+      <div id="delta${i}" class="delta"></div>
+      <div id="score${i}">${scores[i]}</div>
+      <div>
+<button 
+  onpointerdown="startHold(${i}, -1)" 
+  onpointerup="stopHold()" 
+  onpointerleave="stopHold()">-</button>
+
+<button 
+  onpointerdown="startHold(${i}, 1)" 
+  onpointerup="stopHold()" 
+  onpointerleave="stopHold()">+</button>
+      </div>
+      <div id="name${i}" class="playerName">${playerNames[i] || "Joueur " + (i+1)}</div>
+    `;
+    zones.appendChild(zone);
+
+    document.getElementById('colorBtn' + i).addEventListener('click', e => {
+      e.stopPropagation();
+      ouvrirColorPicker(i, document.getElementById('colorBtn' + i));
+    });
+
+    const nameEl = document.getElementById("name" + i);
+    nameEl.addEventListener("click", () => {
+      const input = document.createElement("input");
+      input.type = "text";
+      input.value = nameEl.textContent;
+      input.className = "playerNameInput";
+      nameEl.replaceWith(input);
+      input.focus();
+      function save() {
+        const newName = input.value.trim() || ("Joueur " + (i+1));
+        playerNames[i] = newName;
+        localStorage.setItem("playerNames", JSON.stringify(playerNames));
+        input.replaceWith(nameEl);
+        nameEl.textContent = newName;
+      }
+      input.addEventListener("blur", save);
+      input.addEventListener("keydown", e => { if (e.key === "Enter") save(); });
+    });
+  }
+}
+
+/* DELTA +1 / -1 */
+function afficherDelta(joueur, valeur) {
+  const deltaEl = document.getElementById('delta' + joueur);
+  let current = parseInt(deltaEl.textContent) || 0;
+  let nouveau = current + valeur;
+  deltaEl.textContent = (nouveau > 0 ? '+' : '') + nouveau;
+  deltaEl.style.opacity = 1;
+  if (timers[joueur]) clearTimeout(timers[joueur]);
+  timers[joueur] = setTimeout(() => { deltaEl.style.opacity = 0; deltaEl.textContent = ''; }, 2000);
+}
+
+function changerScore(joueur, valeur) {
+  scores[joueur] += valeur;
+  document.getElementById('score' + joueur).textContent = scores[joueur];
+  localStorage.setItem("scores", JSON.stringify(scores));
+  afficherDelta(joueur, valeur);
+}
+
+/* COLOR PICKER */
+function ouvrirColorPicker(joueur, btn) {
+  let existing = document.getElementById('colorPicker');
+  if (existing) existing.remove();
+  const picker = document.createElement('div');
+  picker.id = 'colorPicker';
+  picker.style.position = 'absolute';
+  picker.style.display = 'flex';
+  picker.style.flexWrap = 'wrap';
+  picker.style.padding = '5px';
+  picker.style.background = 'white';
+  picker.style.border = '1px solid #ccc';
+  picker.style.borderRadius = '5px';
+  picker.style.top = (btn.getBoundingClientRect().bottom + window.scrollY) + 'px';
+  picker.style.left = (btn.getBoundingClientRect().left + window.scrollX) + 'px';
+  picker.style.zIndex = 1000;
+  colors.forEach(color => {
+    const swatch = document.createElement('div');
+    swatch.style.width = '30px';
+    swatch.style.height = '30px';
+    swatch.style.margin = '2px';
+    swatch.style.borderRadius = '50%';
+    swatch.style.cursor = 'pointer';
+    swatch.style.background = color;
+    swatch.addEventListener('click', () => {
+      document.getElementById('joueur' + joueur).style.background = color;
+      savedColors[joueur] = color;
+      localStorage.setItem("colors", JSON.stringify(savedColors));
+      picker.remove();
+    });
+    picker.appendChild(swatch);
+  });
+  document.body.appendChild(picker);
+  document.addEventListener('click', function fermerPicker(e) {
+    if (!picker.contains(e.target) && e.target !== btn) {
+      picker.remove();
+      document.removeEventListener('click', fermerPicker);
+    }
+  });
+}
+
+document.getElementById('settingsModal').addEventListener('click', (event) => { if (event.target === document.getElementById('settingsModal')) document.getElementById('settingsModal').style.display = 'none'; });
+
+creerJoueurs(numPlayers);
+</script>
+
+</body>
+</html>
