@@ -12,6 +12,7 @@
   #zones { display: flex; flex-wrap: wrap; }
   .zone { flex: 1 1 45%; display: flex; justify-content: center; align-items: center; flex-direction: column; color: white; font-size: 3rem; user-select: none; position: relative; margin: 5px; height: 200px; border-radius: 10px; }
   button { font-size: 1.5rem; margin: 5px; width: 60px; height: 60px; border-radius: 50%; border: none; cursor: pointer; }
+  button {  touch-action: none; }
   .delta { position: absolute; top: 5%; font-size: 1.5rem; opacity: 0; transition: opacity 0.3s; }
   .playerName { position: absolute; bottom: 5px; width: 100%; text-align: center; font-size: 1.4rem; color: white; cursor: pointer; }
   .playerNameInput { position: absolute; bottom: 5px; width: 90%; left: 5%; text-align: center; font-size: 1.4rem; border: none; border-radius: 5px; padding: 3px; }
@@ -88,22 +89,20 @@ let repeatDelay = 300;   // vitesse de départ
 let minDelay = 100;       // vitesse max
 let acceleration = 0.85; // facteur d'accélération
 
-function startHold(joueur, valeur) {
-  changerScore(joueur, valeur); // 1er clic immédiat
+function startHold(e, joueur, valeur) {
+  e.target.setPointerCapture(e.pointerId); // 👈 garde le contrôle du doigt
 
+  changerScore(joueur, valeur); // 1er clic immédiat
   repeatDelay = 300;
 
   holdTimeout = setTimeout(function repeat() {
     changerScore(joueur, valeur);
-
-    // Accélération progressive
     repeatDelay = Math.max(minDelay, repeatDelay * acceleration);
-
     holdTimeout = setTimeout(repeat, repeatDelay);
   }, holdDelay);
 }
 
-function stopHold() {
+function stopHold(e) {
   clearTimeout(holdTimeout);
 }
 
@@ -232,14 +231,14 @@ function creerJoueurs(value) {
       <div id="score${i}">${scores[i]}</div>
       <div>
 <button 
-  onpointerdown="startHold(${i}, -1)" 
+  onpointerdown="startHold(event, ${i}, -1)" 
   onpointerup="stopHold()" 
-  onpointerleave="stopHold()">-</button>
+  onpointercancel="stopHold()">-</button>
 
 <button 
-  onpointerdown="startHold(${i}, 1)" 
+  onpointerdown="startHold(event, ${i}, 1)" 
   onpointerup="stopHold()" 
-  onpointerleave="stopHold()">+</button>
+  onpointercancel="stopHold()">+</button>
       </div>
       <div id="name${i}" class="playerName">${playerNames[i] || "Joueur " + (i+1)}</div>
     `;
